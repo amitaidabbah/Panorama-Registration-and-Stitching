@@ -37,6 +37,7 @@ def build_filter(size):
     gaus = np.array(BASE_FILTER).astype(np.uint64)
     for i in range(size - 2):
         gaus = np.convolve(gaus, BASE_FILTER)
+    print(gaus.shape)
     return gaus * (2 ** -(size - 1))
 
 
@@ -72,6 +73,20 @@ def build_gaussian_pyramid(im, max_levels, filter_size):
     return gaussian_pyramid, filter.reshape((1, filter_size))
 
 
+def create_kernel(size):
+    """
+    creates a gaussian kernel
+    :param size: the size of the kernel N*N
+    :return: the gaussian kernel
+    """
+    res = np.array([1, 1]).astype(np.double)
+    for i in range(size - 2):
+        res = np.convolve(res, np.array([1, 1]))
+    res = res * np.transpose(res.reshape((1, res.shape[0])))
+
+    return res / np.sum(res)
+
+
 def blur_spatial(im, kernel_size):
     """
     performs the blur in the spatial domain using convolution
@@ -81,7 +96,7 @@ def blur_spatial(im, kernel_size):
     """
     if kernel_size <= 1:
         return im
-    return convolve2d(im, build_filter(kernel_size), 'same')
+    return convolve2d(im, create_kernel(kernel_size), 'same')
 
 
 def expand(im, filter):

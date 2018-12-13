@@ -22,18 +22,14 @@ def calculate_response(im):
     :param im: image to asses edges.
     :return: response image.
     """
-    x, y = np.shape(im)
-    res = np.zeros((x * y, 2, 2))
     ix = convolve1d(im, np.array([1, 0, -1]), )
     iy = np.transpose(convolve1d(im.T, np.array([1, 0, -1]), ))
-    ixiy = ix * iy
-    res[:, 0, 0] = np.square(ix).reshape(x * y)
-    res[:, 1, 1] = np.square(iy).reshape(x * y)
-    res[:, 1, 0] = ixiy.reshape(x * y)
-    res[:, 0, 1] = ixiy.reshape(x * y)
-    t = np.trace(res, axis1=1, axis2=2)
-    d = np.linalg.det(res)
-    return (d - 0.04 * (t ** 2)).reshape((x, y))
+    ixiy = sol4_utils.blur_spatial(ix * iy, 3)
+    ix2 = sol4_utils.blur_spatial(ix**2,3)
+    iy2 = sol4_utils.blur_spatial(iy**2,3)
+    t = ix2 + iy2
+    d = (ix2*iy2)-(ixiy**2)
+    return d - 0.04 * (t ** 2)
 
 
 def harris_corner_detector(im):
@@ -408,15 +404,15 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    # rect = sol4_utils.read_image("rect.jpg", 1)
-    # resp = calculate_response(rect)
-    # cor = harris_corner_detector(rect)
-    # plt.figure()
-    # plt.subplot(1,2,1)
-    # plt.imshow(rect, cmap='gray')
-    # plt.subplot(1,2,2)
-    # plt.imshow(resp, cmap='gray')
-    # plt.scatter(cor[:,0],cor[:,1] , color='green')
-    # plt.show()
-    a = np.zeros((5, 5))
-    print(non_maximum_suppression(a))
+    rect = sol4_utils.read_image("rect.jpg", 1)
+    resp = calculate_response(rect)
+    cor = spread_out_corners(rect,1,1,2)
+    plt.figure()
+    plt.subplot(1, 2, 1)
+    plt.imshow(rect, cmap='gray')
+    plt.subplot(1, 2, 2)
+    plt.imshow(resp, cmap='gray')
+    plt.scatter(cor[:, 0], cor[:, 1], color='green')
+    plt.show()
+    # a = np.zeros((5, 5))
+    # print(non_maximum_suppression(a))
