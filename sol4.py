@@ -2,14 +2,16 @@
 # You may change this code, but keep the functions' signatures
 # You can also split the code to multiple files as long as this file's API is unchanged
 import shutil
+from math import ceil, floor
 
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+import scipy
 
 from scipy.ndimage.morphology import generate_binary_structure
 from scipy.ndimage.filters import maximum_filter
-from scipy.ndimage import label, center_of_mass
+from scipy.ndimage import label, center_of_mass, map_coordinates
 from skimage.io import imsave
 from scipy.ndimage.filters import convolve1d
 
@@ -25,10 +27,10 @@ def calculate_response(im):
     ix = convolve1d(im, np.array([1, 0, -1]), )
     iy = np.transpose(convolve1d(im.T, np.array([1, 0, -1]), ))
     ixiy = sol4_utils.blur_spatial(ix * iy, 3)
-    ix2 = sol4_utils.blur_spatial(ix**2,3)
-    iy2 = sol4_utils.blur_spatial(iy**2,3)
+    ix2 = sol4_utils.blur_spatial(ix ** 2, 3)
+    iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
     t = ix2 + iy2
-    d = (ix2*iy2)-(ixiy**2)
+    d = (ix2 * iy2) - (ixiy ** 2)
     return d - 0.04 * (t ** 2)
 
 
@@ -52,7 +54,17 @@ def sample_descriptor(im, pos, desc_rad):
     :param desc_rad: "Radius" of descriptors to compute.
     :return: A 3D array with shape (N,K,K) containing the ith descriptor at desc[i,:,:].
     """
-    N, x = pos.shape
+    x, y = pos.shape
+    k = 1 + 2 * desc_rad
+    desc = np.zeros((x, k, k))
+    for i in range(x):
+        a, b = np.meshgrid(np.arange(pos[i][0] - floor(k / 2), pos[i][0] + ceil(k / 2), 1),
+                           np.arange(pos[i][1] - floor(k / 2), pos[i][1] + ceil(k / 2), 1))
+        cords = np.stack([a, b]).reshape(2, k ** 2)
+        res = map_coordinates(im, cords, order=1, prefilter=False)
+        res = (res - np.mean(res)) / np.linalg.norm(res)
+        desc[i] = res.reshape(k, k).T
+    return desc
 
 
 def find_features(pyr):
@@ -64,7 +76,9 @@ def find_features(pyr):
                    These coordinates are provided at the pyramid level pyr[0].
                 2) A feature descriptor array with shape (N,K,K)
     """
-    pass
+    coreners = spread_out_corners(pyr[0], 7, 7, 2)
+    descriptor = sample_descriptor(pyr[2], coreners / (2 ^ 3), 3)
+    return descriptor, coreners
 
 
 def match_features(desc1, desc2, min_score):
@@ -404,15 +418,15 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    rect = sol4_utils.read_image("rect.jpg", 1)
-    resp = calculate_response(rect)
-    cor = spread_out_corners(rect,1,1,2)
-    plt.figure()
-    plt.subplot(1, 2, 1)
-    plt.imshow(rect, cmap='gray')
-    plt.subplot(1, 2, 2)
-    plt.imshow(resp, cmap='gray')
-    plt.scatter(cor[:, 0], cor[:, 1], color='green')
-    plt.show()
-    # a = np.zeros((5, 5))
-    # print(non_maximum_suppression(a))
+    # rect = sol4_utils.read_image("oxford1.jpg", 1)
+    # resp = calculate_response(rect)
+    # cor = spread_out_corners(rect, 14, 14, 2)
+    # plt.imshow(rect, cmap='gray')
+    # plt.scatter(cor[:, 0], cor[:, 1], color='blue')
+    # plt.show()
+    # print(cor.shape)
+    # print(cor.T)
+
+    a = np.linspace(1, 81, 81).reshape(9, 9).astype(np.float64)
+    print(sample_descriptor(a, np.array([[3, 3], [3, 4]]), 3))
+    # sample_descriptor(a,np.array([[3.5,3.5]]).T,3)
