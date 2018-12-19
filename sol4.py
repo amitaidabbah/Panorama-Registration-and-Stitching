@@ -62,7 +62,7 @@ def sample_descriptor(im, pos, desc_rad):
                            np.arange(pos[i][1] - floor(k / 2), pos[i][1] + ceil(k / 2), 1))
         cords = np.stack([a, b]).reshape(2, k ** 2)
         res = map_coordinates(im, cords, order=1, prefilter=False)
-        res = (res - np.mean(res)) / np.linalg.norm(res)
+        res = (res - np.mean(res)) / np.linalg.norm(res - np.mean(res))
         desc[i] = res.reshape(k, k).T
     return desc
 
@@ -76,8 +76,8 @@ def find_features(pyr):
                    These coordinates are provided at the pyramid level pyr[0].
                 2) A feature descriptor array with shape (N,K,K)
     """
-    coreners = spread_out_corners(pyr[0], 7, 7, 2)
-    descriptor = sample_descriptor(pyr[2], coreners / (2 ^ 3), 3)
+    coreners = spread_out_corners(pyr[0], 1, 1, 2)
+    descriptor = sample_descriptor(pyr[2], coreners / (2 ** 3), 3)
     return descriptor, coreners
 
 
@@ -91,7 +91,17 @@ def match_features(desc1, desc2, min_score):
                 1) An array with shape (M,) and dtype int of matching indices in desc1.
                 2) An array with shape (M,) and dtype int of matching indices in desc2.
     """
-    pass
+    j = desc1.shape[0]
+    k = desc2.shape[0]
+    bolmat = np.zeros((j, k), np.bool)
+    scoremat = np.zeros((j, k), np.float64)
+    for l in range(j):
+        for m in range(k):
+            score = np.dot(desc1[l, :, :].flat, desc2[m, :, :].flat)
+            if score > min_score:
+                scoremat[l, m] = score
+
+    return scoremat
 
 
 def apply_homography(pos1, H12):
@@ -418,15 +428,22 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    # rect = sol4_utils.read_image("oxford1.jpg", 1)
-    # resp = calculate_response(rect)
-    # cor = spread_out_corners(rect, 14, 14, 2)
-    # plt.imshow(rect, cmap='gray')
-    # plt.scatter(cor[:, 0], cor[:, 1], color='blue')
+    ox1 = sol4_utils.read_image("oxford1.jpg", 1)
+    pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
+    desc1, cor1 = find_features(pyr1)
+
+    ox2 = sol4_utils.read_image("oxford2.jpg", 1)
+    pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
+    desc2, cor2 = find_features(pyr2)
+    # print(desc1)
+    desc = match_features(desc1, desc2, 0.5)
+    print(desc)
+    # plt.imshow(ox1, cmap='gray')
+    # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
     # plt.show()
     # print(cor.shape)
     # print(cor.T)
 
-    a = np.linspace(1, 81, 81).reshape(9, 9).astype(np.float64)
-    print(sample_descriptor(a, np.array([[3, 3], [3, 4]]), 3))
+    # a = np.linspace(1, 81, 81).reshape(9, 9).astype(np.float64)
+    # print(sample_descriptor(a, np.array([[3, 3], [3, 4]]), 3))
     # sample_descriptor(a,np.array([[3.5,3.5]]).T,3)
