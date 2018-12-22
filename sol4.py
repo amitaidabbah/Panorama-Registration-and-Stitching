@@ -7,7 +7,6 @@ from math import ceil, floor
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-import scipy
 
 from scipy.ndimage.morphology import generate_binary_structure
 from scipy.ndimage.filters import maximum_filter
@@ -92,15 +91,24 @@ def match_features(desc1, desc2, min_score):
                 2) An array with shape (M,) and dtype int of matching indices in desc2.
     """
     j = desc1.shape[0]
+    t = desc1.shape[1] ** 2
     k = desc2.shape[0]
-    bolmat = np.zeros((j, k), np.bool)
-    scoremat = np.zeros((j, k), np.float64)
-    for l in range(j):
-        for m in range(k):
-            score = np.dot(desc1[l, :, :].flat, desc2[m, :, :].flat)
-            if score > min_score:
-                scoremat[l, m] = score
-
+    scoremat = np.dot(desc1.reshape((j, t)), desc2.reshape((k, t)).T)
+    scoremat[scoremat < min_score] = 0
+    desc1idx = np.argpartition(scoremat, 2, 0)[2:, :] + np.meshgrid(np.linspace(0, (k - 1) * j, j))
+    desc2idx = np.argpartition(scoremat, 2, 1)[:, 2:] + np.transpose(np.meshgrid(np.linspace(0, (k - 1) * j, j)))
+    a,b = np.unravel_index(desc1idx.astype(np.int32),(j,k))
+    print(a)
+    print(b)
+    c = np.empty((2,8), dtype=a.dtype)
+    c[:,0::2] = b
+    c[0::2,:] = a
+    c[:,1::2] = b
+    c[1::2,:] = a
+    # print(np.unravel_index(desc1idx.astype(np.int32),(j,k)))
+    print(c.T)
+    # print(desc1idx)
+    # print(desc2idx)
     return scoremat
 
 
@@ -428,22 +436,33 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    ox1 = sol4_utils.read_image("oxford1.jpg", 1)
-    pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
-    desc1, cor1 = find_features(pyr1)
-
-    ox2 = sol4_utils.read_image("oxford2.jpg", 1)
-    pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-    desc2, cor2 = find_features(pyr2)
-    # print(desc1)
-    desc = match_features(desc1, desc2, 0.5)
-    print(desc)
+    # ox1 = sol4_utils.read_image("oxford1.jpg", 1)
+    # pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
+    # desc1, cor1 = find_features(pyr1)
+    #
+    # ox2 = sol4_utils.read_image("oxford2.jpg", 1)
+    # pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
+    # desc2, cor2 = find_features(pyr2)
+    # # print(desc1)
+    # desc1,desc2 = match_features(desc1, desc2, 0.5)
+    # print(desc1,desc2)
     # plt.imshow(ox1, cmap='gray')
     # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
     # plt.show()
     # print(cor.shape)
     # print(cor.T)
 
-    # a = np.linspace(1, 81, 81).reshape(9, 9).astype(np.float64)
-    # print(sample_descriptor(a, np.array([[3, 3], [3, 4]]), 3))
-    # sample_descriptor(a,np.array([[3.5,3.5]]).T,3)
+    a = np.linspace(1, 16, 16).reshape(4, 2, 2)
+    b = np.linspace(1, 16, 16).reshape(4, 2, 2)
+    # print(np.dot(a.reshape(4,4),b.reshape(4,4).T))
+    r1 = match_features(a, b, 0)
+    # print(r1)
+    # print(a)
+    # b= np.argpartition(a,2,1)[:,2:]
+    # c= np.array([[0,4,8,12],[0,4,8,12]]).T
+    # print(np.unravel_index(b+c,(4,4)))
+    # d = np.column_stack(np.unravel_index(b+c,(4,4)))
+    # print(d)
+    # print(d.reshape(8,2))
+
+    # print(a[d[:,0],d[:,1]])
