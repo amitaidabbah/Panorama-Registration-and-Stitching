@@ -37,7 +37,6 @@ def build_filter(size):
     gaus = np.array(BASE_FILTER).astype(np.uint64)
     for i in range(size - 2):
         gaus = np.convolve(gaus, BASE_FILTER)
-    print(gaus.shape)
     return gaus * (2 ** -(size - 1))
 
 

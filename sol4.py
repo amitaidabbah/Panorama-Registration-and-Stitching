@@ -59,10 +59,14 @@ def sample_descriptor(im, pos, desc_rad):
     for i in range(x):
         a, b = np.meshgrid(np.arange(pos[i][0] - floor(k / 2), pos[i][0] + ceil(k / 2), 1),
                            np.arange(pos[i][1] - floor(k / 2), pos[i][1] + ceil(k / 2), 1))
-        cords = np.stack([a, b]).reshape(2, k ** 2)
+        print(a)
+        cords = np.stack([b, a]).reshape(2, k ** 2)
         res = map_coordinates(im, cords, order=1, prefilter=False)
-        res = (res - np.mean(res)) / np.linalg.norm(res - np.mean(res))
-        desc[i] = res.reshape(k, k).T
+        if np.linalg.norm(res - np.mean(res)) == 0:
+            desc[i] = 0
+        else:
+            res = (res - np.mean(res)) / np.linalg.norm(res - np.mean(res))
+            desc[i] = res.reshape(k, k).T
     return desc
 
 
@@ -75,8 +79,8 @@ def find_features(pyr):
                    These coordinates are provided at the pyramid level pyr[0].
                 2) A feature descriptor array with shape (N,K,K)
     """
-    coreners = spread_out_corners(pyr[0], 1, 1, 2)
-    descriptor = sample_descriptor(pyr[2], coreners / (2 ** 3), 3)
+    coreners = spread_out_corners(pyr[0], 1, 1, 3)
+    descriptor = sample_descriptor(pyr[2], 0.25 * coreners, 3)
     return descriptor, coreners
 
 
@@ -90,26 +94,26 @@ def match_features(desc1, desc2, min_score):
                 1) An array with shape (M,) and dtype int of matching indices in desc1.
                 2) An array with shape (M,) and dtype int of matching indices in desc2.
     """
+
     j = desc1.shape[0]
     t = desc1.shape[1] ** 2
     k = desc2.shape[0]
     scoremat = np.dot(desc1.reshape((j, t)), desc2.reshape((k, t)).T)
-    scoremat[scoremat < min_score] = 0
-    desc1idx = np.argpartition(scoremat, 2, 0)[2:, :] + np.meshgrid(np.linspace(0, (k - 1) * j, j))
-    desc2idx = np.argpartition(scoremat, 2, 1)[:, 2:] + np.transpose(np.meshgrid(np.linspace(0, (k - 1) * j, j)))
-    a,b = np.unravel_index(desc1idx.astype(np.int32),(j,k))
-    print(a)
-    print(b)
-    c = np.empty((2,8), dtype=a.dtype)
-    c[:,0::2] = b
-    c[0::2,:] = a
-    c[:,1::2] = b
-    c[1::2,:] = a
-    # print(np.unravel_index(desc1idx.astype(np.int32),(j,k)))
-    print(c.T)
-    # print(desc1idx)
-    # print(desc2idx)
-    return scoremat
+    # scoremat[scoremat < min_score] = 0
+    boolmat1 = np.zeros(scoremat.shape).astype(np.bool)
+    boolmat2 = np.zeros(scoremat.shape).astype(np.bool)
+    scoremat2 = scoremat.copy()
+    for i in range(2):
+        i, j = np.where((scoremat2.T == np.amax(scoremat2, axis=1)))
+        boolmat1[j, i] = True
+        scoremat2[j, i] = 0
+    scoremat2 = scoremat.copy()
+    for i in range(2):
+        i, j = np.where(scoremat2 == np.amax(scoremat2, axis=0))
+        boolmat2[i, j] = True
+        scoremat2[i, j] = 0
+    i, j = np.where((boolmat1 | boolmat2) & (scoremat > min_score))
+    return i, j
 
 
 def apply_homography(pos1, H12):
@@ -119,7 +123,9 @@ def apply_homography(pos1, H12):
     :param H12: A 3x3 homography matrix.
     :return: An array with the same shape as pos1 with [x,y] point coordinates obtained from transforming pos1 using H12.
     """
-    pass
+    res = np.vstack([pos1.T, np.ones((pos1.shape[0],))])
+    res = H12 @ res
+    return (res / res[2, :])[0:2, :].T
 
 
 def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=False):
@@ -135,10 +141,26 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
                 2) An Array with shape (S,) where S is the number of inliers,
                     containing the indices in pos1/pos2 of the maximal set of inlier matches found.
     """
-    pass
+    # print(points2.shape)
+    # print(points1.shape)
+    besthom = 0
+    bestinliers = np.zeros((0, 0))
+    for i in range(num_iter):
+        random = np.random.randint(0, points1.shape[0], (2,)).astype(np.int32)
+        p1 = points1[random]
+        p2 = points2[random]
+        hom = estimate_rigid_transform(p1, p2)
+        p2t = apply_homography(points1, hom)
+        E = (np.abs((points2 - p2t)) ** 2)
+        inliersidx = np.where((E < inlier_tol) == True)[0]
+        if inliersidx.size > bestinliers.size:
+            bestinliers = inliersidx
+            besthom = hom
+
+    return besthom, bestinliers
 
 
-def display_matches(im1, im2, points1, points2, inliers):
+def display_matches(im1, im2, points1, points2, inliers, hom):
     """
     Dispalay matching points.
     :param im1: A grayscale image.
@@ -147,7 +169,20 @@ def display_matches(im1, im2, points1, points2, inliers):
     :param pos2: An aray shape (N,2), containing N rows of [x,y] coordinates of matched points in im2.
     :param inliers: An array with shape (S,) of inlier matches.
     """
-    pass
+    im = np.hstack([im1, im2])
+    points2[:, 0] += im1.shape[1]
+    plt.imshow(im, cmap="gray")
+    plt.scatter(points1[:, 0], points1[:, 1], marker='o')
+    plt.scatter(points2[:, 0], points2[:, 1], marker='o')
+
+    for i in range(points1.shape[0]):
+        if i in inliers:
+            plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='y', lw=1, ms=2,
+                     marker='o')
+        # else:
+        # plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='b', lw=.2, ms=2,
+        #          marker='o')
+    plt.show()
 
 
 def accumulate_homographies(H_succesive, m):
@@ -347,7 +382,8 @@ class PanoramicVideoGenerator:
         # Compute composite homographies from the central coordinate system.
         accumulated_homographies = accumulate_homographies(Hs, (len(Hs) - 1) // 2)
         self.homographies = np.stack(accumulated_homographies)
-        self.frames_for_panoramas = filter_homographies_with_translation(self.homographies, minimum_right_translation=5)
+        self.frames_for_panoramas = filter_homographies_with_translation(self.homographies,
+                                                                         minimum_right_translation=5)
         self.homographies = self.homographies[self.frames_for_panoramas]
 
     def generate_panoramic_images(self, number_of_panoramas):
@@ -436,15 +472,18 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    # ox1 = sol4_utils.read_image("oxford1.jpg", 1)
-    # pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
-    # desc1, cor1 = find_features(pyr1)
-    #
-    # ox2 = sol4_utils.read_image("oxford2.jpg", 1)
-    # pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-    # desc2, cor2 = find_features(pyr2)
-    # # print(desc1)
-    # desc1,desc2 = match_features(desc1, desc2, 0.5)
+    ox1 = sol4_utils.read_image("oxford1.jpg", 1)
+    pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
+    desc1, cor1 = find_features(pyr1)
+
+    ox2 = sol4_utils.read_image("oxford2.jpg", 1)
+    pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
+    desc2, cor2 = find_features(pyr2)
+
+    f1, f2 = match_features(desc1, desc2, 0.5)
+    # print(f1)
+    hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 0.5, 1)
+    display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers, 1)
     # print(desc1,desc2)
     # plt.imshow(ox1, cmap='gray')
     # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
@@ -452,17 +491,7 @@ if __name__ == '__main__':
     # print(cor.shape)
     # print(cor.T)
 
-    a = np.linspace(1, 16, 16).reshape(4, 2, 2)
-    b = np.linspace(1, 16, 16).reshape(4, 2, 2)
-    # print(np.dot(a.reshape(4,4),b.reshape(4,4).T))
-    r1 = match_features(a, b, 0)
-    # print(r1)
-    # print(a)
-    # b= np.argpartition(a,2,1)[:,2:]
-    # c= np.array([[0,4,8,12],[0,4,8,12]]).T
-    # print(np.unravel_index(b+c,(4,4)))
-    # d = np.column_stack(np.unravel_index(b+c,(4,4)))
-    # print(d)
-    # print(d.reshape(8,2))
-
-    # print(a[d[:,0],d[:,1]])
+    # points = np.random.randint(1, 32, (5, 2))
+    # hom = np.array([[1, 0, 0], [0, 1, 0], [0, 0,0]])
+    # # print(points)
+    # apply_homography(points, hom)
