@@ -46,7 +46,6 @@ def harris_corner_detector(im):
     """
 
     R = calculate_response(im)
-    print(np.argwhere(non_maximum_suppression(R).T))
     return np.argwhere(non_maximum_suppression(R).T)
 
 
