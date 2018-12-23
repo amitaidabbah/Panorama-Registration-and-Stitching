@@ -16,6 +16,10 @@ from scipy.ndimage.filters import convolve1d
 
 import sol4_utils
 
+PYR_FACTOR = 0.25
+R_FACTOR = 0.04
+SHAPE = 7
+
 
 def calculate_response(im):
     """
@@ -30,7 +34,7 @@ def calculate_response(im):
     iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
     t = ix2 + iy2
     d = (ix2 * iy2) - (ixiy ** 2)
-    return d - 0.04 * (t ** 2)
+    return d - R_FACTOR * (t ** 2)
 
 
 def harris_corner_detector(im):
@@ -42,6 +46,7 @@ def harris_corner_detector(im):
     """
 
     R = calculate_response(im)
+    print(np.argwhere(non_maximum_suppression(R).T))
     return np.argwhere(non_maximum_suppression(R).T)
 
 
@@ -59,7 +64,6 @@ def sample_descriptor(im, pos, desc_rad):
     for i in range(x):
         a, b = np.meshgrid(np.arange(pos[i][0] - floor(k / 2), pos[i][0] + ceil(k / 2), 1),
                            np.arange(pos[i][1] - floor(k / 2), pos[i][1] + ceil(k / 2), 1))
-        print(a)
         cords = np.stack([b, a]).reshape(2, k ** 2)
         res = map_coordinates(im, cords, order=1, prefilter=False)
         if np.linalg.norm(res - np.mean(res)) == 0:
@@ -79,9 +83,9 @@ def find_features(pyr):
                    These coordinates are provided at the pyramid level pyr[0].
                 2) A feature descriptor array with shape (N,K,K)
     """
-    coreners = spread_out_corners(pyr[0], 1, 1, 3)
-    descriptor = sample_descriptor(pyr[2], 0.25 * coreners, 3)
-    return descriptor, coreners
+    corners = spread_out_corners(pyr[0], SHAPE, SHAPE, 3)
+    descriptor = sample_descriptor(pyr[2], PYR_FACTOR * corners, 3)
+    return descriptor, corners
 
 
 def match_features(desc1, desc2, min_score):
@@ -99,7 +103,6 @@ def match_features(desc1, desc2, min_score):
     t = desc1.shape[1] ** 2
     k = desc2.shape[0]
     scoremat = np.dot(desc1.reshape((j, t)), desc2.reshape((k, t)).T)
-    # scoremat[scoremat < min_score] = 0
     boolmat1 = np.zeros(scoremat.shape).astype(np.bool)
     boolmat2 = np.zeros(scoremat.shape).astype(np.bool)
     scoremat2 = scoremat.copy()
@@ -112,7 +115,7 @@ def match_features(desc1, desc2, min_score):
         i, j = np.where(scoremat2 == np.amax(scoremat2, axis=0))
         boolmat2[i, j] = True
         scoremat2[i, j] = 0
-    i, j = np.where((boolmat1 | boolmat2) & (scoremat > min_score))
+    i, j = np.where((boolmat1 & boolmat2) & (scoremat > min_score))
     return i, j
 
 
@@ -141,15 +144,16 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
                 2) An Array with shape (S,) where S is the number of inliers,
                     containing the indices in pos1/pos2 of the maximal set of inlier matches found.
     """
-    # print(points2.shape)
-    # print(points1.shape)
+    num_of_points = 2
+    if translation_only:
+        num_of_points = 1
     besthom = 0
     bestinliers = np.zeros((0, 0))
     for i in range(num_iter):
-        random = np.random.randint(0, points1.shape[0], (2,)).astype(np.int32)
+        random = np.random.randint(0, points1.shape[0], (num_of_points,)).astype(np.int32)
         p1 = points1[random]
         p2 = points2[random]
-        hom = estimate_rigid_transform(p1, p2)
+        hom = estimate_rigid_transform(p1, p2, translation_only)
         p2t = apply_homography(points1, hom)
         E = (np.abs((points2 - p2t)) ** 2)
         inliersidx = np.where((E < inlier_tol) == True)[0]
@@ -160,7 +164,7 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
     return besthom, bestinliers
 
 
-def display_matches(im1, im2, points1, points2, inliers, hom):
+def display_matches(im1, im2, points1, points2, inliers):
     """
     Dispalay matching points.
     :param im1: A grayscale image.
@@ -172,16 +176,13 @@ def display_matches(im1, im2, points1, points2, inliers, hom):
     im = np.hstack([im1, im2])
     points2[:, 0] += im1.shape[1]
     plt.imshow(im, cmap="gray")
-    plt.scatter(points1[:, 0], points1[:, 1], marker='o')
-    plt.scatter(points2[:, 0], points2[:, 1], marker='o')
-
     for i in range(points1.shape[0]):
-        if i in inliers:
-            plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='y', lw=1, ms=2,
+        if i not in inliers:
+            plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='b', lw=.2, ms=2,
                      marker='o')
-        # else:
-        # plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='b', lw=.2, ms=2,
-        #          marker='o')
+    for i in inliers:
+        plt.plot((points1[i, 0], points2[i, 0]), (points1[i, 1], points2[i, 1]), mfc='r', c='y', lw=1, ms=2,
+                 marker='o')
     plt.show()
 
 
@@ -472,18 +473,16 @@ class PanoramicVideoGenerator:
 
 
 if __name__ == '__main__':
-    ox1 = sol4_utils.read_image("oxford1.jpg", 1)
-    pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
-    desc1, cor1 = find_features(pyr1)
-
-    ox2 = sol4_utils.read_image("oxford2.jpg", 1)
-    pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-    desc2, cor2 = find_features(pyr2)
-
-    f1, f2 = match_features(desc1, desc2, 0.5)
-    # print(f1)
-    hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 0.5, 1)
-    display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers, 1)
+    for i in range(1):
+        ox1 = sol4_utils.read_image("oxford1.jpg", 1)
+        pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
+        desc1, cor1 = find_features(pyr1)
+        # ox2 = sol4_utils.read_image("oxford2.jpg", 1)
+        # pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
+        # desc2, cor2 = find_features(pyr2)
+        # f1, f2 = match_features(desc1, desc2, 0.7)
+        # hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 1, 1)
+        # display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers)
     # print(desc1,desc2)
     # plt.imshow(ox1, cmap='gray')
     # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
