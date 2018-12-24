@@ -17,7 +17,7 @@ from scipy.ndimage.filters import convolve1d
 import sol4_utils
 
 PYR_FACTOR = 0.25
-R_FACTOR = 0.04
+K_FACTOR = 0.04
 SHAPE = 7
 
 
@@ -34,7 +34,7 @@ def calculate_response(im):
     iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
     t = ix2 + iy2
     d = (ix2 * iy2) - (ixiy ** 2)
-    return d - R_FACTOR * (t ** 2)
+    return d - K_FACTOR * (t ** 2)
 
 
 def harris_corner_detector(im):
@@ -46,7 +46,7 @@ def harris_corner_detector(im):
     """
 
     R = calculate_response(im)
-    return np.argwhere(non_maximum_suppression(R).T)
+    return np.flip(np.argwhere(non_maximum_suppression(R).T),1)
 
 
 def sample_descriptor(im, pos, desc_rad):
@@ -146,7 +146,6 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
     num_of_points = 2
     if translation_only:
         num_of_points = 1
-    besthom = 0
     bestinliers = np.zeros((0, 0))
     for i in range(num_iter):
         random = np.random.randint(0, points1.shape[0], (num_of_points,)).astype(np.int32)
@@ -155,12 +154,12 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
         hom = estimate_rigid_transform(p1, p2, translation_only)
         p2t = apply_homography(points1, hom)
         E = (np.abs((points2 - p2t)) ** 2)
+        print(E.min())
         inliersidx = np.where((E < inlier_tol) == True)[0]
         if inliersidx.size > bestinliers.size:
             bestinliers = inliersidx
-            besthom = hom
-
-    return besthom, bestinliers
+    H = estimate_rigid_transform(points1[bestinliers], points2[bestinliers])
+    return H / H[2, 2], bestinliers
 
 
 def display_matches(im1, im2, points1, points2, inliers):
@@ -476,12 +475,12 @@ if __name__ == '__main__':
         ox1 = sol4_utils.read_image("oxford1.jpg", 1)
         pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
         desc1, cor1 = find_features(pyr1)
-        # ox2 = sol4_utils.read_image("oxford2.jpg", 1)
-        # pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-        # desc2, cor2 = find_features(pyr2)
-        # f1, f2 = match_features(desc1, desc2, 0.7)
-        # hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 1, 1)
-        # display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers)
+        ox2 = sol4_utils.read_image("oxford2.jpg", 1)
+        pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
+        desc2, cor2 = find_features(pyr2)
+        f1, f2 = match_features(desc1, desc2, 0.7)
+        hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 0.01, 1)
+        display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers)
     # print(desc1,desc2)
     # plt.imshow(ox1, cmap='gray')
     # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
