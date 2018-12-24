@@ -84,7 +84,7 @@ def find_features(pyr):
     """
     corners = spread_out_corners(pyr[0], SHAPE, SHAPE, 3)
     descriptor = sample_descriptor(pyr[2], PYR_FACTOR * corners, 3)
-    return descriptor, corners
+    return corners,descriptor
 
 
 def match_features(desc1, desc2, min_score):
