@@ -46,7 +46,7 @@ def harris_corner_detector(im):
     """
 
     R = calculate_response(im)
-    return np.flip(np.argwhere(non_maximum_suppression(R).T),1)
+    return np.flip(np.argwhere(non_maximum_suppression(R).T), 1)
 
 
 def sample_descriptor(im, pos, desc_rad):
@@ -84,7 +84,7 @@ def find_features(pyr):
     """
     corners = spread_out_corners(pyr[0], SHAPE, SHAPE, 3)
     descriptor = sample_descriptor(pyr[2], PYR_FACTOR * corners, 3)
-    return corners,descriptor
+    return corners, descriptor
 
 
 def match_features(desc1, desc2, min_score):
@@ -474,10 +474,10 @@ if __name__ == '__main__':
     for i in range(1):
         ox1 = sol4_utils.read_image("oxford1.jpg", 1)
         pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
-        desc1, cor1 = find_features(pyr1)
+        cor1, desc1 = find_features(pyr1)
         ox2 = sol4_utils.read_image("oxford2.jpg", 1)
         pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-        desc2, cor2 = find_features(pyr2)
+        cor2, desc2 = find_features(pyr2)
         f1, f2 = match_features(desc1, desc2, 0.7)
         hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 0.01, 1)
         display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers)
