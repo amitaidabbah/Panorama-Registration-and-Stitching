@@ -1,40 +1,22 @@
 # Initial code for ex4.
-# You may change this code, but keep the functions' signatures
-# You can also split the code to multiple files as long as this file's API is unchanged
-import shutil
-from math import ceil, floor
+# You may change this code, but keep the functions’ signatures
+# You can also split the code to multiple files as long as this file’s API is unchanged
 
+import shutil
+from math import floor, ceil
 import numpy as np
 import os
 import matplotlib.pyplot as plt
-
 from scipy.ndimage.morphology import generate_binary_structure
-from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.filters import maximum_filter, convolve1d
 from scipy.ndimage import label, center_of_mass, map_coordinates
-from skimage.io import imsave
-from scipy.ndimage.filters import convolve1d
-
+from scipy.misc import imsave as imsave
 import sol4_utils
 
-PYR_FACTOR = 0.25
+DER = np.array([[1, 0, -1]])
 K_FACTOR = 0.04
+PYR_FACTOR = 0.25
 SHAPE = 7
-
-
-def calculate_response(im):
-    """
-    this function calculates the edge response of the image based on harris edge detector.
-    :param im: image to asses edges.
-    :return: response image.
-    """
-    ix = convolve1d(im, np.array([1, 0, -1]), )
-    iy = np.transpose(convolve1d(im.T, np.array([1, 0, -1]), ))
-    ixiy = sol4_utils.blur_spatial(ix * iy, 3)
-    ix2 = sol4_utils.blur_spatial(ix ** 2, 3)
-    iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
-    t = ix2 + iy2
-    d = (ix2 * iy2) - (ixiy ** 2)
-    return d - K_FACTOR * (t ** 2)
 
 
 def harris_corner_detector(im):
@@ -44,9 +26,17 @@ def harris_corner_detector(im):
     :param im: A 2D array representing an image.
     :return: An array with shape (N,2), where ret[i,:] are the [x,y] coordinates of the ith corner points.
     """
-
-    R = calculate_response(im)
-    return np.flip(np.argwhere(non_maximum_suppression(R).T), 1)
+    ix = convolve1d(im, np.array([1, 0, -1]), )
+    iy = np.transpose(convolve1d(im.T, np.array([1, 0, -1]), ))
+    ixiy = sol4_utils.blur_spatial(ix * iy, 3)
+    ix2 = sol4_utils.blur_spatial(ix ** 2, 3)
+    iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
+    t = ix2 + iy2
+    d = (ix2 * iy2) - (ixiy ** 2)
+    R = d - K_FACTOR * (t ** 2)
+    local_maxes = non_maximum_suppression(R)
+    xy_coords = np.flip(np.argwhere(local_maxes == 1), 1)
+    return xy_coords
 
 
 def sample_descriptor(im, pos, desc_rad):
@@ -64,12 +54,13 @@ def sample_descriptor(im, pos, desc_rad):
         a, b = np.meshgrid(np.arange(pos[i][0] - floor(k / 2), pos[i][0] + ceil(k / 2), 1),
                            np.arange(pos[i][1] - floor(k / 2), pos[i][1] + ceil(k / 2), 1))
         cords = np.stack([b, a]).reshape(2, k ** 2)
-        res = map_coordinates(im, cords, order=1, prefilter=False)
-        if np.linalg.norm(res - np.mean(res)) == 0:
-            desc[i] = 0
+        res = map_coordinates(im, cords, order=1, prefilter=False).reshape((k, k))
+        norm = np.linalg.norm(res - np.mean(res))
+        if norm == 0:
+            desc[i] = (res - np.mean(res))
         else:
-            res = (res - np.mean(res)) / np.linalg.norm(res - np.mean(res))
-            desc[i] = res.reshape(k, k).T
+            res = (res - np.mean(res)) / norm
+        desc[i] = res
     return desc
 
 
@@ -78,9 +69,9 @@ def find_features(pyr):
     Detects and extracts feature points from a pyramid.
     :param pyr: Gaussian pyramid of a grayscale image having 3 levels.
     :return: A list containing:
-                1) An array with shape (N,2) of [x,y] feature location per row found in the image.
-                   These coordinates are provided at the pyramid level pyr[0].
-                2) A feature descriptor array with shape (N,K,K)
+    1) An array with shape (N,2) of [x,y] feature location per row found in the image.
+    These coordinates are provided at the pyramid level pyr[0].
+    2) A feature descriptor array with shape (N,K,K)
     """
     corners = spread_out_corners(pyr[0], SHAPE, SHAPE, 3)
     descriptor = sample_descriptor(pyr[2], PYR_FACTOR * corners, 3)
@@ -94,10 +85,9 @@ def match_features(desc1, desc2, min_score):
     :param desc2: A feature descriptor array with shape (N2,K,K).
     :param min_score: Minimal match score.
     :return: A list containing:
-                1) An array with shape (M,) and dtype int of matching indices in desc1.
-                2) An array with shape (M,) and dtype int of matching indices in desc2.
+    1) An array with shape (M,) and dtype int of matching indices in desc1.
+    2) An array with shape (M,) and dtype int of matching indices in desc2.
     """
-
     j = desc1.shape[0]
     t = desc1.shape[1] ** 2
     k = desc2.shape[0]
@@ -125,6 +115,7 @@ def apply_homography(pos1, H12):
     :param H12: A 3x3 homography matrix.
     :return: An array with the same shape as pos1 with [x,y] point coordinates obtained from transforming pos1 using H12.
     """
+
     res = np.vstack([pos1.T, np.ones((pos1.shape[0],))])
     res = H12 @ res
     return (res / res[2, :])[0:2, :].T
@@ -137,15 +128,13 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
     :param pos2: An array with shape (N,2) containing N rows of [x,y] coordinates of matched points in image 2.
     :param num_iter: Number of RANSAC iterations to perform.
     :param inlier_tol: inlier tolerance threshold.
-    :param translation_only: see estimate rigid transform
     :return: A list containing:
-                1) A 3x3 normalized homography matrix.
-                2) An Array with shape (S,) where S is the number of inliers,
-                    containing the indices in pos1/pos2 of the maximal set of inlier matches found.
+    1) A 3x3 normalized homography matrix.
+    2) An Array with shape (S,) where S is the number of inliers,
+    containing the indices in pos1/pos2 of the maximal set of inlier matches found.
     """
-    num_of_points = 2
-    if translation_only:
-        num_of_points = 1
+
+    num_of_points = 4
     bestinliers = np.zeros((0, 0))
     for i in range(num_iter):
         random = np.random.randint(0, points1.shape[0], (num_of_points,)).astype(np.int32)
@@ -153,13 +142,12 @@ def ransac_homography(points1, points2, num_iter, inlier_tol, translation_only=F
         p2 = points2[random]
         hom = estimate_rigid_transform(p1, p2, translation_only)
         p2t = apply_homography(points1, hom)
-        E = (np.abs((points2 - p2t)) ** 2)
-        print(E.min())
-        inliersidx = np.where((E < inlier_tol) == True)[0]
+        E = np.linalg.norm((points2 - p2t), axis=1)
+        inliersidx = np.where((E < inlier_tol))[0]
         if inliersidx.size > bestinliers.size:
             bestinliers = inliersidx
     H = estimate_rigid_transform(points1[bestinliers], points2[bestinliers])
-    return H / H[2, 2], bestinliers
+    return H, bestinliers
 
 
 def display_matches(im1, im2, points1, points2, inliers):
@@ -189,26 +177,20 @@ def accumulate_homographies(H_succesive, m):
     Convert a list of succesive homographies to a
     list of homographies to a common reference frame.
     :param H_successive: A list of M-1 3x3 homography
-      matrices where H_successive[i] is a homography which transforms points
-      from coordinate system i to coordinate system i+1.
+    matrices where H_successive[i] is a homography which transforms points
+    from coordinate system i to coordinate system i+1.
     :param m: Index of the coordinate system towards which we would like to
-      accumulate the given homographies.
+    accumulate the given homographies.
     :return: A list of M 3x3 homography matrices,
-      where H2m[i] transforms points from coordinate system i to coordinate system m
+    where H2m[i] transforms points from coordinate system i to coordinate system m
     """
-    pass
-
-
-def compute_bounding_box(homography, w, h):
-    """
-    computes bounding box of warped image under homography, without actually warping the image
-    :param homography: homography
-    :param w: width of the image
-    :param h: height of the image
-    :return: 2x2 array, where the first row is [x,y] of the top left corner,
-     and the second row is the [x,y] of the bottom right corner
-    """
-    pass
+    H_hat = [[]] * (len(H_succesive) + 1)
+    H_hat[m] = np.eye(3)
+    for i in range(m - 1, -1, -1):
+        H_hat[i] = np.dot(H_hat[i + 1], H_succesive[i])
+    for i in range(m + 1, len(H_succesive) + 1):
+        H_hat[i] = np.dot(H_hat[i - 1], np.linalg.inv(H_succesive[i - 1]))
+    return H_hat
 
 
 def warp_channel(image, homography):
@@ -218,7 +200,21 @@ def warp_channel(image, homography):
     :param homography: homograhpy.
     :return: A 2d warped image.
     """
-    pass
+    bounding = compute_bounding_box(homography, image.shape[1], image.shape[0])
+    range_x = np.arange(bounding[0, 0], bounding[1, 0])
+    range_y = np.arange(bounding[0, 1], bounding[1, 1])
+    new_grid = np.meshgrid(range_x, range_y)
+
+    x ,y = new_grid[0].shape[0],new_grid[1].shape[1]
+
+    range_x = (new_grid[0]).flatten()
+    range_y = new_grid[1].flatten()
+    grid = np.vstack((range_x, range_y)).T
+    coords_original = apply_homography(grid, np.linalg.inv(homography))
+
+    warped = map_coordinates(image, np.transpose(np.flip(coords_original, axis=1)), order=1,
+                             prefilter=False).reshape(new_grid[0].shape[0], new_grid[1].shape[1])
+    return warped
 
 
 def warp_image(image, homography):
@@ -231,6 +227,24 @@ def warp_image(image, homography):
     return np.dstack([warp_channel(image[..., channel], homography) for channel in range(3)])
 
 
+def compute_bounding_box(homography, w, h):
+    """
+    computes bounding box of warped image under homography, without actually warping the image
+    :param homography: homography
+    :param w: width of the image
+    :param h: height of the image
+    :return: 2x2 array, where the first row is [x,y] of the top left corner,
+    and the second row is the [x,y] of the bottom right corner
+    """
+    points = np.array([[0, 0], [0, h - 1], [w - 1, 0], [w - 1, h - 1]])
+    tpoints = apply_homography(points, homography)
+    top_l_x = np.floor(np.min(tpoints[:, 0])).astype(int)
+    top_l_y = np.floor(np.min(tpoints[:, 1])).astype(int)
+    bottom_r_x = np.ceil(np.max(tpoints[:, 0])).astype(int)
+    bottom_r_y = np.ceil(np.max(tpoints[:, 1])).astype(int)
+    return np.array([[top_l_x, top_l_y], [bottom_r_x, bottom_r_y]])
+
+
 def filter_homographies_with_translation(homographies, minimum_right_translation):
     """
     Filters rigid transformations encoded as homographies by the amount of translation from left to right.
@@ -238,6 +252,7 @@ def filter_homographies_with_translation(homographies, minimum_right_translation
     :param minimum_right_translation: amount of translation below which the transformation is discarded.
     :return: filtered homographies..
     """
+
     translation_over_thresh = [0]
     last = homographies[0][0, -1]
     for i in range(1, len(homographies)):
@@ -256,6 +271,7 @@ def estimate_rigid_transform(points1, points2, translation_only=False):
     :param translation_only: whether to compute translation only. False (default) to compute rotation as well.
     :return: A 3x3 array with the computed homography.
     """
+
     centroid1 = points1.mean(axis=0)
     centroid2 = points2.mean(axis=0)
 
@@ -267,16 +283,41 @@ def estimate_rigid_transform(points1, points2, translation_only=False):
         centered_points1 = points1 - centroid1
         centered_points2 = points2 - centroid2
 
-        sigma = centered_points2.T @ centered_points1
+        sigma = np.dot(centered_points2.T, centered_points1)
         U, _, Vt = np.linalg.svd(sigma)
 
-        rotation = U @ Vt
-        translation = -rotation @ centroid1 + centroid2
+        rotation = np.dot(U, Vt)
+        translation = np.dot(-rotation, centroid1) + centroid2
 
     H = np.eye(3)
     H[:2, :2] = rotation
     H[:2, 2] = translation
     return H
+
+
+def least_squares_homography(points1, points2):
+    """
+    Computes homography transforming points1 towards points2, using least squares method.
+    points1[i,:] corresponds to poins2[i,:]. In every point, the first coordinate is *x*.
+    :param points1: array with shape (N,2). Holds coordinates of corresponding points from image 1.
+    :param points2: array with shape (N,2). Holds coordinates of corresponding points from image 2.
+    :return: A 3X3 array with the computed homography. In case of instable solutions returns None.
+    """
+
+    p1, p2 = points1, points2
+    o0, o1 = np.zeros((p1.shape[0], 1)), np.ones((p1.shape[0], 1))
+    A = np.vstack(
+        [np.hstack([p1[:, :1], o0, -p1[:, :1] * p2[:, :1], p1[:, 1:], o0, -p1[:, 1:] * p2[:, :1], o1, o0]),
+         np.hstack([o0, p1[:, :1], -p1[:, :1] * p2[:, 1:], o0, p1[:, 1:], -p1[:, 1:] * p2[:, 1:], o0, o1])])
+    # Return None for unstable solutions
+    if np.linalg.matrix_rank(A, 1e-3) < 8:
+        return None
+    if A.shape[0] == 8 and np.linalg.cond(A) > 1e10:
+        return None
+
+    H = np.linalg.lstsq(A, p2.T.flatten())[0]
+    H = np.r_[H, 1]
+    return H.reshape((3, 3)).T
 
 
 def non_maximum_suppression(image):
@@ -285,6 +326,7 @@ def non_maximum_suppression(image):
     :param image: A 2D array representing an image.
     :return: A boolean array with the same shape as the input image, where True indicates local maximum.
     """
+
     # Find local maximas.
     neighborhood = generate_binary_structure(2, 2)
     local_max = maximum_filter(image, footprint=neighborhood) == image
@@ -309,6 +351,7 @@ def spread_out_corners(im, m, n, radius):
     :param radius: Minimal distance of corner points from the boundary of the image.
     :return: An array with shape (N,2), where ret[i,:] are the [x,y] coordinates of the ith corner points.
     """
+
     corners = [np.empty((0, 2), dtype=np.int)]
     x_bound = np.linspace(0, im.shape[1], n + 1, dtype=np.int)
     y_bound = np.linspace(0, im.shape[0], m + 1, dtype=np.int)
@@ -470,25 +513,4 @@ class PanoramicVideoGenerator:
         plt.show()
 
 
-if __name__ == '__main__':
-    for i in range(1):
-        ox1 = sol4_utils.read_image("oxford1.jpg", 1)
-        pyr1 = sol4_utils.build_gaussian_pyramid(ox1, 3, 3)[0]
-        cor1, desc1 = find_features(pyr1)
-        ox2 = sol4_utils.read_image("oxford2.jpg", 1)
-        pyr2 = sol4_utils.build_gaussian_pyramid(ox2, 3, 3)[0]
-        cor2, desc2 = find_features(pyr2)
-        f1, f2 = match_features(desc1, desc2, 0.7)
-        hom, inliers = ransac_homography(cor1[f1], cor2[f2], 1000, 0.01, 1)
-        display_matches(ox1, ox2, cor1[f1], cor2[f2], inliers)
-    # print(desc1,desc2)
-    # plt.imshow(ox1, cmap='gray')
-    # plt.scatter(cor1[:, 0], cor1[:, 1], color='blue')
-    # plt.show()
-    # print(cor.shape)
-    # print(cor.T)
 
-    # points = np.random.randint(1, 32, (5, 2))
-    # hom = np.array([[1, 0, 0], [0, 1, 0], [0, 0,0]])
-    # # print(points)
-    # apply_homography(points, hom)
