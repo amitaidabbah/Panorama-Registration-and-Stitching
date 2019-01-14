@@ -11,7 +11,7 @@ from scipy.ndimage.morphology import generate_binary_structure
 from scipy.ndimage.filters import maximum_filter, convolve1d
 from scipy.ndimage import label, center_of_mass, map_coordinates
 from scipy.misc import imsave as imsave
-import sol4_utils
+import utils
 
 DER = np.array([[1, 0, -1]])
 K_FACTOR = 0.04
@@ -28,9 +28,9 @@ def harris_corner_detector(im):
     """
     ix = convolve1d(im, np.array([1, 0, -1]), )
     iy = np.transpose(convolve1d(im.T, np.array([1, 0, -1]), ))
-    ixiy = sol4_utils.blur_spatial(ix * iy, 3)
-    ix2 = sol4_utils.blur_spatial(ix ** 2, 3)
-    iy2 = sol4_utils.blur_spatial(iy ** 2, 3)
+    ixiy = utils.blur_spatial(ix * iy, 3)
+    ix2 = utils.blur_spatial(ix ** 2, 3)
+    iy2 = utils.blur_spatial(iy ** 2, 3)
     t = ix2 + iy2
     d = (ix2 * iy2) - (ixiy ** 2)
     R = d - K_FACTOR * (t ** 2)
@@ -397,9 +397,9 @@ class PanoramicVideoGenerator:
         # Extract feature point locations and descriptors.
         points_and_descriptors = []
         for file in self.files:
-            image = sol4_utils.read_image(file, 1)
+            image = utils.read_image(file, 1)
             self.h, self.w = image.shape
-            pyramid, _ = sol4_utils.build_gaussian_pyramid(image, 3, 7)
+            pyramid, _ = utils.build_gaussian_pyramid(image, 3, 7)
             points_and_descriptors.append(find_features(pyramid))
 
         # Compute homographies between successive pairs of images.
@@ -468,7 +468,7 @@ class PanoramicVideoGenerator:
         self.panoramas = np.zeros((number_of_panoramas, panorama_size[1], panorama_size[0], 3), dtype=np.float64)
         for i, frame_index in enumerate(self.frames_for_panoramas):
             # warp every input image once, and populate all panoramas
-            image = sol4_utils.read_image(self.files[frame_index], 2)
+            image = utils.read_image(self.files[frame_index], 2)
             warped_image = warp_image(image, self.homographies[i])
             x_offset, y_offset = self.bounding_boxes[i][0].astype(np.int)
             y_bottom = y_offset + warped_image.shape[0]
